@@ -212,6 +212,9 @@ class KiroBridge:
     async def _handle_message(self, session: KiroSession, msg: KiroMessage) -> None:
         """Dispatch a parsed kiro message."""
         match msg.type:
+            case "skip":
+                return  # filtered noise — don't relay
+
             case "output":
                 if msg.content:
                     session.output_buffer.append(msg.content)

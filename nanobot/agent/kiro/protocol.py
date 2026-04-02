@@ -8,6 +8,27 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+# ── ANSI escape code stripper ───────────────────────────────────
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b\[[\d;]*m")
+
+# ── Patterns for lines that are code-diff noise from kiro-cli ──
+# Lines like: "+ 42": ..., "- 10": ..., or raw diff markers
+_DIFF_LINE_RE = re.compile(
+    r"^[+\-]\s*\d+\s*:"       # "+ 42:" or "- 10:" diff line numbers
+)
+_DIFF_HEADER_RE = re.compile(
+    r"^(Creating|Reading|Editing|Deleting):\s"  # tool action headers
+)
+_TOOL_STATUS_RE = re.compile(
+    r"^\s*[✓✗]\s+Successfully\s"               # "✓ Successfully read/wrote..."
+)
+_COMPLETED_RE = re.compile(
+    r"^.*Completed in \d+\.\d+s\s*$"           # "- Completed in 0.2s"
+)
+_USING_TOOL_RE = re.compile(
+    r"\(using tool:\s*\w+"                      # "(using tool: read, ...)"
+)
+
 # Heuristic patterns for detecting interactive prompts in plain-text mode
 _PROMPT_PATTERNS = [
     re.compile(r"\[y/n\]", re.IGNORECASE),
@@ -17,7 +38,6 @@ _PROMPT_PATTERNS = [
     re.compile(r"请选择|请确认|请输入|please choose|please confirm", re.IGNORECASE),
     re.compile(r"continue\?\s*$", re.IGNORECASE),
     re.compile(r"proceed\?\s*$", re.IGNORECASE),
-    re.compile(r":\s*$"),  # ends with colon (common input prompt)
 ]
 
 _VALID_TYPES = {"output", "prompt", "done", "error", "file_changed"}
@@ -27,7 +47,7 @@ _VALID_TYPES = {"output", "prompt", "done", "error", "file_changed"}
 class KiroMessage:
     """Parsed message from kiro-cli stdout."""
 
-    type: str  # output | prompt | done | error | file_changed
+    type: str  # output | prompt | done | error | file_changed | skip
     content: str = ""
     prompt_id: str | None = None
     options: list[str] = field(default_factory=list)
@@ -38,19 +58,60 @@ class KiroMessage:
     raw: str = ""  # original line
 
 
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return _ANSI_RE.sub("", text)
+
+
+def _is_noise(text: str) -> bool:
+    """Return True if the line is code-diff noise that should not be relayed."""
+    if _DIFF_LINE_RE.match(text):
+        return True
+    if _TOOL_STATUS_RE.match(text):
+        return True
+    if _COMPLETED_RE.match(text):
+        return True
+    return False
+
+
+def _extract_file_action(text: str) -> tuple[str, str] | None:
+    """Try to extract a file action from tool headers like 'Creating: /path/to/file'."""
+    m = _DIFF_HEADER_RE.match(text)
+    if m:
+        action = m.group(1).lower()  # creating, reading, editing, deleting
+        rest = text[m.end():].strip()
+        # Strip trailing "(using tool: ...)" and "- Completed in ..."
+        rest = _USING_TOOL_RE.sub("", rest).strip()
+        rest = _COMPLETED_RE.sub("", rest).strip()
+        if rest:
+            return action, rest
+    return None
+
+
+def _clean_agent_line(text: str) -> str:
+    """Clean a kiro-cli agent output line (the '> ' prefixed lines)."""
+    # Strip the "> " prefix that kiro-cli uses for agent speech
+    if text.startswith("> "):
+        text = text[2:]
+    # Also strip leading/trailing whitespace
+    return text.strip()
+
+
 def parse_line(line: str) -> KiroMessage:
     """Parse a single line from kiro-cli stdout.
 
+    Strips ANSI codes, filters diff noise, and extracts meaningful content.
     Tries JSONL first; falls back to plain-text heuristic.
     """
-    stripped = line.strip()
-    if not stripped:
-        return KiroMessage(type="output", content="", raw=line)
+    # Step 1: strip ANSI escape codes
+    cleaned = strip_ansi(line).strip()
+    if not cleaned:
+        return KiroMessage(type="skip", content="", raw=line)
 
-    # Try JSONL
-    if stripped.startswith("{"):
+    # Step 2: try JSONL
+    if cleaned.startswith("{"):
         try:
-            data: dict[str, Any] = json.loads(stripped)
+            data: dict[str, Any] = json.loads(cleaned)
             msg_type = data.get("type", "output")
             if msg_type not in _VALID_TYPES:
                 msg_type = "output"
@@ -68,11 +129,35 @@ def parse_line(line: str) -> KiroMessage:
         except (json.JSONDecodeError, TypeError):
             pass  # fall through to plain-text
 
-    # Plain-text fallback
-    if is_interactive_prompt(stripped):
-        return KiroMessage(type="prompt", content=stripped, raw=line)
+    # Step 3: filter diff/noise lines
+    if _is_noise(cleaned):
+        return KiroMessage(type="skip", content="", raw=line)
 
-    return KiroMessage(type="output", content=stripped, raw=line)
+    # Step 4: detect file action headers (Creating: /path, Editing: /path)
+    fa = _extract_file_action(cleaned)
+    if fa:
+        action, path = fa
+        return KiroMessage(type="file_changed", content="", path=path, action=action, raw=line)
+
+    # Step 5: detect "(using tool: ...)" lines — skip them
+    if _USING_TOOL_RE.search(cleaned):
+        return KiroMessage(type="skip", content="", raw=line)
+
+    # Step 6: agent speech lines ("> some text")
+    if cleaned.startswith("> "):
+        text = _clean_agent_line(cleaned)
+        if not text:
+            return KiroMessage(type="skip", content="", raw=line)
+        if is_interactive_prompt(text):
+            return KiroMessage(type="prompt", content=text, raw=line)
+        return KiroMessage(type="output", content=text, raw=line)
+
+    # Step 7: plain text — check if it's a prompt
+    if is_interactive_prompt(cleaned):
+        return KiroMessage(type="prompt", content=cleaned, raw=line)
+
+    # Step 8: remaining non-empty text is output
+    return KiroMessage(type="output", content=cleaned, raw=line)
 
 
 def is_interactive_prompt(text: str) -> bool:
