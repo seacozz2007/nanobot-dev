@@ -149,11 +149,27 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+# @AI_GENERATED: Kiro v1.0
+class KiroConfig(Base):
+    """Kiro CLI bridge configuration."""
+
+    enabled: bool = False
+    command: str = "kiro-cli"
+    args: list[str] = Field(default_factory=lambda: ["chat", "--no-interactive", "--trust-all-tools"])
+    timeout: int = 600  # Max execution time in seconds
+    input_timeout: int = 300  # Max wait for user reply in seconds
+    workspace: str | None = None  # Override workspace path; None = use agent workspace
+# @AI_GENERATED: end
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    # @AI_GENERATED: Kiro v1.0
+    kiro: KiroConfig = Field(default_factory=KiroConfig)
+    # @AI_GENERATED: end
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

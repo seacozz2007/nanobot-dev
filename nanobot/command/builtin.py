@@ -92,12 +92,27 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+# @AI_GENERATED: Kiro v1.0
+async def cmd_kiro_cancel(ctx: CommandContext) -> OutboundMessage:
+    """Cancel the active kiro-cli task for the session."""
+    loop = ctx.loop
+    msg = ctx.msg
+    bridge = getattr(loop, "kiro_bridge", None)
+    if bridge and await bridge.cancel(msg.session_key):
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Kiro task cancelled.")
+    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No active Kiro task to cancel.")
+# @AI_GENERATED: end
+
+
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
+        # @AI_GENERATED: Kiro v1.0
+        "/kiro_cancel — Cancel the active Kiro task",
+        # @AI_GENERATED: end
         "/restart — Restart the bot",
         "/status — Show bot status",
         "/help — Show available commands",
@@ -110,6 +125,9 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
+    # @AI_GENERATED: Kiro v1.0
+    router.priority("/kiro_cancel", cmd_kiro_cancel)
+    # @AI_GENERATED: end
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)

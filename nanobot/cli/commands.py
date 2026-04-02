@@ -550,6 +550,9 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        # @AI_GENERATED: Kiro v1.0
+        kiro_config=runtime_config.tools.kiro,
+        # @AI_GENERATED: end
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -638,6 +641,9 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        # @AI_GENERATED: Kiro v1.0
+        kiro_config=config.tools.kiro,
+        # @AI_GENERATED: end
     )
 
     # Set cron callback (needs agent)
@@ -843,6 +849,9 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        # @AI_GENERATED: Kiro v1.0
+        kiro_config=config.tools.kiro,
+        # @AI_GENERATED: end
     )
 
     # Shared reference for progress callbacks

@@ -33,7 +33,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, KiroConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -183,8 +183,9 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        kiro_config: KiroConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import ExecToolConfig, KiroConfig, WebSearchConfig
 
         self.bus = bus
         self.channels_config = channels_config
@@ -216,6 +217,22 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+
+        # @AI_GENERATED: Kiro v1.0
+        # Initialize Kiro Bridge if configured
+        self.kiro_bridge: KiroBridge | None = None
+        kiro_cfg = kiro_config or KiroConfig()
+        if kiro_cfg.enabled:
+            from nanobot.agent.kiro.bridge import KiroBridge
+            self.kiro_bridge = KiroBridge(
+                bus=bus,
+                workspace=workspace,
+                command=kiro_cfg.command,
+                args=kiro_cfg.args,
+                timeout=kiro_cfg.timeout,
+                input_timeout=kiro_cfg.input_timeout,
+            )
+        # @AI_GENERATED: end
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -266,6 +283,11 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+        # @AI_GENERATED: Kiro v1.0
+        if self.kiro_bridge:
+            from nanobot.agent.tools.kiro import KiroTool
+            self.tools.register(KiroTool(bridge=self.kiro_bridge))
+        # @AI_GENERATED: end
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -291,7 +313,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "kiro"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -398,6 +420,20 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
+        # @AI_GENERATED: Kiro v1.0
+        # Route to kiro bridge if there's an active interactive session
+        if self.kiro_bridge and msg.channel != "system" and self.kiro_bridge.has_active_session(msg.session_key):
+            state = self.kiro_bridge.get_state(msg.session_key)
+            if state == "waiting_input":
+                await self.kiro_bridge.send_reply(msg.session_key, msg.content.strip())
+                return
+            elif state == "running":
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="⏳ Kiro 正在执行中，请稍候...",
+                ))
+                return
+        # @AI_GENERATED: end
         lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
         async with lock, gate:
@@ -455,10 +491,14 @@ class AgentLoop:
                 ))
 
     async def close_mcp(self) -> None:
-        """Drain pending background archives, then close MCP connections."""
+        """Drain pending background archives, then close MCP and kiro connections."""
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        # @AI_GENERATED: Kiro v1.0
+        if self.kiro_bridge:
+            await self.kiro_bridge.cleanup_all()
+        # @AI_GENERATED: end
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
