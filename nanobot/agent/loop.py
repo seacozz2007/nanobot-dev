@@ -289,6 +289,8 @@ class AgentLoop:
             self.tools.register(KiroTool(bridge=self.kiro_bridge))
         # @AI_GENERATED: end
 
+
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -391,6 +393,20 @@ class AgentLoop:
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
+        # @AI_GENERATED: startup tool summary logging
+        logger.info("Registered {} tools: {}", len(self.tools), ", ".join(self.tools.tool_names))
+        if self.kiro_bridge:
+            logger.info("Kiro bridge: ENABLED (command={})", self.kiro_bridge._command)
+        else:
+            logger.info("Kiro bridge: DISABLED (set tools.kiro.enabled=true to enable)")
+        if self._mcp_servers:
+            mcp_names = ", ".join(self._mcp_servers.keys())
+            logger.info("MCP servers: {} (connected={})", mcp_names, self._mcp_connected)
+        else:
+            logger.info("MCP servers: none configured")
+        if not self.exec_config.enable:
+            logger.info("Shell exec tool: DISABLED")
+        # @AI_GENERATED: end
 
         while self._running:
             try:
