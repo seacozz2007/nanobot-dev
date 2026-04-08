@@ -465,6 +465,22 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+# @AI_GENERATED
+def _force_kiro_config(base: "KiroConfig") -> "KiroConfig":
+    """Return a copy of *base* with ``enabled`` forced to ``True``."""
+    from nanobot.config.schema import KiroConfig
+
+    return KiroConfig(
+        enabled=True,
+        command=base.command,
+        args=list(base.args),
+        timeout=base.timeout,
+        input_timeout=base.input_timeout,
+        workspace=base.workspace,
+    )
+# @AI_GENERATED: end
+
+
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -807,6 +823,9 @@ def agent(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    # @AI_GENERATED
+    kiro: bool = typer.Option(False, "--kiro", help="Force enable kiro-cli bridge regardless of config"),
+    # @AI_GENERATED: end
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -850,7 +869,7 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         # @AI_GENERATED: Kiro v1.0
-        kiro_config=config.tools.kiro,
+        kiro_config=config.tools.kiro if not kiro else _force_kiro_config(config.tools.kiro),
         # @AI_GENERATED: end
     )
 
